@@ -1,0 +1,38 @@
+# EKF configuration for a 2D robot with Wheel Odometry and IMU
+# Fusing Odometry (Vx, Vyaw) and IMU (VYaw, Ax)
+ekf_filter_node:
+  ros__parameters:
+    frequency: 30.0
+    two_d_mode: true
+
+    # The EKF will publish the odom->base_link transform
+    publish_tf: true
+    
+    # Frame names
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_link
+    world_frame: odom
+
+    # Sensor 0: Wheel Odometry from vehicle_driver
+    odom0: /odom
+    odom0_config:
+      # [X, Y, Z, R, P, Y, Vx, Vy, Vz, VR, VP, VY, Ax, Ay, Az]
+      [false, false, false,
+       false, false, false,
+       true,  true,  false,
+       false, false, true,
+       false, false, false]
+    odom0_differential: false
+
+    # Sensor 1: IMU from imu_publisher
+    imu0: /imu/data
+    imu0_config:
+      # [X, Y, Z, R, P, Y, Vx, Vy, Vz, VR, VP, VY, Ax, Ay, Az]
+      [false, false, false,
+       false, false, false,
+       false, false, false,
+       false, false, true,  # Use Angular Velocity Z
+       true,  false, false] # Use Linear Acceleration X
+    imu0_differential: false
+    imu0_remove_gravitational_acceleration: true
