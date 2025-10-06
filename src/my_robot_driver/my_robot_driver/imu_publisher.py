@@ -93,7 +93,7 @@ class IMUPublisher(Node):
             # --- Apply Gyro Calibration ---
             msg.angular_velocity.x = gyro_x_raw - self.gyro_x_bias
             msg.angular_velocity.y = gyro_y_raw - self.gyro_y_bias
-            msg.angular_velocity.z = gyro_z_raw - self.gyro_z_bias
+            msg.angular_velocity.z = gyro_z_raw - self.gyro_z_bias * -1.0
 
             # --- Apply Accel Calibration ---
             accel_x_cal = accel_x_raw - self.accel_x_bias
