@@ -1,5 +1,5 @@
 # EKF configuration for a 2D robot with Wheel Odometry and IMU
-# Fusing Odometry (Vx, Vyaw) and IMU (VYaw, Ax)
+# This is the standard and correct configuration.
 ekf_filter_node:
   ros__parameters:
     frequency: 30.0
@@ -15,24 +15,28 @@ ekf_filter_node:
     world_frame: odom
 
     # Sensor 0: Wheel Odometry from vehicle_driver
+    # This provides our primary position and linear velocity estimate.
     odom0: /odom
     odom0_config:
+      # We use X position, Y position, and Yaw rotation from this source.
+      # The velocities are implicitly used by the filter's model.
       # [X, Y, Z, R, P, Y, Vx, Vy, Vz, VR, VP, VY, Ax, Ay, Az]
-      [false, false, false,
-       false, false, false,
-       true,  true,  false,
+      [true,  true,  false,
        false, false, true,
+       false, false, false,
+       false, false, false,
        false, false, false]
     odom0_differential: false
 
     # Sensor 1: IMU from imu_publisher
+    # This provides our rotational velocity correction.
     imu0: /imu/data
     imu0_config:
-      # [X, Y, Z, R, P, Y, Vx, Vy, Vz, VR, VP, VY, Ax, Ay, Az]
+      # We ONLY use the rotational velocity around Z (Yaw rate) from the IMU.
       [false, false, false,
        false, false, false,
        false, false, false,
-       false, false, true,  # Use Angular Velocity Z
-       true,  false, false] # Use Linear Acceleration X
+       false, false, true,
+       false, false, false]
     imu0_differential: false
     imu0_remove_gravitational_acceleration: true

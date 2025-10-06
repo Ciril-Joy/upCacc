@@ -1,7 +1,8 @@
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import Twist, TransformStamped
 from nav_msgs.msg import Odometry
+from tf2_ros import TransformBroadcaster
 import math
 import serial
 import time
@@ -14,8 +15,10 @@ class VehicleDriver(Node):
         
         self.declare_parameter('serial_port', '/dev/ttyACM0')
         self.declare_parameter('baud_rate', 57600)
+        
         serial_port = self.get_parameter('serial_port').get_parameter_value().string_value
         baud_rate = self.get_parameter('baud_rate').get_parameter_value().integer_value
+        
         try:
             self.arduino = serial.Serial(serial_port, baud_rate, timeout=0.1)
             self.get_logger().info(f"Successfully connected to Arduino on {serial_port}")
@@ -27,16 +30,23 @@ class VehicleDriver(Node):
 
         self.subscription = self.create_subscription(Twist, 'cmd_vel', self.cmd_vel_callback, 10)
         self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
+        
+        # This is now UN-COMMENTED and active
+        self.odom_broadcaster = TransformBroadcaster(self)
 
-        self.x, self.y, self.th = 0.0, 0.0, 0.0
-        self.vx, self.vth = 0.0, 0.0
+        self.x = 0.0
+        self.y = 0.0
+        self.th = 0.0
+        self.vx = 0.0
+        self.vth = 0.0
         self.last_time = self.get_clock().now()
         self.last_cmd_vel_time = self.get_clock().now()
 
-        self.odom_timer = self.create_timer(0.02, self.publish_odometry)
-        self.watchdog_timer = self.create_timer(0.1, self.watchdog_callback)
-        self.get_logger().info('Vehicle Driver Node with Odometry has been started.')
-    
+        self.odom_timer = self.create_timer(0.02, self.publish_odometry) # 50Hz
+        self.watchdog_timer = self.create_timer(0.1, self.watchdog_callback) # 10Hz
+
+        self.get_logger().info('Vehicle Driver Node (with TF) has been started.')
+
     def watchdog_callback(self):
         if (self.get_clock().now() - self.last_cmd_vel_time).nanoseconds / 1e9 > 0.5:
             self.vx = 0.0
@@ -47,8 +57,8 @@ class VehicleDriver(Node):
         self.vx = msg.linear.x
         self.vth = msg.angular.z
 
-        max_lin_speed_mapping = 1.12 # YOUR CALIBRATED VALUE
-        max_ang_speed_mapping = 1.5  # This value is not critical when using IMU fusion
+        max_lin_speed_mapping = 1.29 # YOUR FINAL CALIBRATED VALUE
+        max_ang_speed_mapping = 0.44 # YOUR CALIBRATED VALUE
         speed_pwm_max = 200
         angle_pwm_max = 255
         speed_pwm = int((self.vx / max_lin_speed_mapping) * speed_pwm_max)
@@ -61,33 +71,50 @@ class VehicleDriver(Node):
     def publish_odometry(self):
         current_time = self.get_clock().now()
         dt = (current_time - self.last_time).nanoseconds / 1e9
-        if dt > 1.0:
+
+        if dt > 1.0: # Prevent large jumps on startup
             self.last_time = current_time
             return
-        
+
         delta_x = self.vx * math.cos(self.th) * dt
         delta_y = self.vx * math.sin(self.th) * dt
         delta_th = self.vth * dt
+
         self.x += delta_x
         self.y += delta_y
         self.th += delta_th
 
         q = euler2quat(0, 0, self.th)
 
+        # Create and publish the TransformStamped message (odom -> base_link)
+        t = TransformStamped()
+        t.header.stamp = current_time.to_msg()
+        t.header.frame_id = 'odom'
+        t.child_frame_id = 'base_link'
+        t.transform.translation.x = self.x
+        t.transform.translation.y = self.y
+        t.transform.translation.z = 0.0
+        t.transform.rotation.w = q[0]
+        t.transform.rotation.x = q[1]
+        t.transform.rotation.y = q[2]
+        t.transform.rotation.z = q[3]
+        
+        # This is now UN-COMMENTED and active
+        self.odom_broadcaster.sendTransform(t)
+
+        # Create and publish the Odometry message
         odom = Odometry()
-        odom.header.stamp = current_time.to_msg()
+        odom.header.stamp = t.header.stamp # Use the same timestamp as the TF
         odom.header.frame_id = 'odom'
         odom.child_frame_id = 'base_link'
         odom.pose.pose.position.x = self.x
         odom.pose.pose.position.y = self.y
-        odom.pose.pose.orientation.w = q[0]
-        odom.pose.pose.orientation.x = q[1]
-        odom.pose.pose.orientation.y = q[2]
-        odom.pose.pose.orientation.z = q[3]
+        odom.pose.pose.position.z = 0.0
+        odom.pose.pose.orientation = t.transform.rotation
         odom.twist.twist.linear.x = self.vx
         odom.twist.twist.angular.z = self.vth
-
-        # High uncertainty for everything except forward velocity and yaw velocity
+        
+        # Add a reasonable covariance
         odom.pose.covariance = np.diag([0.1, 0.1, 999.9, 999.9, 999.9, 0.1]).flatten().tolist()
         odom.twist.covariance = np.diag([0.1, 999.9, 999.9, 999.9, 999.9, 0.1]).flatten().tolist()
         
@@ -103,8 +130,10 @@ class VehicleDriver(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = VehicleDriver()
-    try: rclpy.spin(node)
-    except KeyboardInterrupt: pass
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
     finally:
         node.on_shutdown()
         node.destroy_node()
